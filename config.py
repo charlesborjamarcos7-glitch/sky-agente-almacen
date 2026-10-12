@@ -10,7 +10,7 @@ os.environ['REPORTES_DIR'] = str(REPORTES)
 
 def configurar_secrets_streamlit(st):
     """Publica secretos de Streamlit solo en el entorno del proceso servidor."""
-    for k in ('GROQ_API_KEY', 'LLM_MODEL', 'SUPABASE_URL', 'SUPABASE_KEY', 'APP_PASSWORD'):
+    for k in ('GROQ_API_KEY', 'LLM_MODEL', 'SUPABASE_URL', 'SUPABASE_KEY', 'APP_PASSWORD', 'GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN', 'GMAIL_ALLOWED_RECIPIENTS'):
         try:
             v = st.secrets.get(k)
         except (FileNotFoundError, KeyError, AttributeError):

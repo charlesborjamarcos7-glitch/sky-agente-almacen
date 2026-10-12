@@ -71,7 +71,7 @@ with st.sidebar:
         for k in ('autorizado','conversaciones','chat_actual'):
             st.session_state.pop(k,None)
         st.rerun()
-    st.caption('Demo protegida. Los chats no son permanentes; Gmail está desactivado.')
+    st.caption('Demo protegida. Los chats no son permanentes. Gmail: solo destinatarios autorizados y confirmación.')
 
 pagina=st.tabs(['💬 Asistente IA','📊 Indicadores','📄 Reportes PDF'])
 with pagina[0]:
@@ -132,20 +132,64 @@ with pagina[1]:
         else: st.info('No hay productos de stock bajo en la respuesta o no se pudo consultar esa vista.')
 with pagina[2]:
     st.header('📄 Generación de reportes')
-    st.caption('Descarga el documento desde tu navegador; Gmail no está disponible en esta demo.')
+    st.caption('Descarga el documento o envíalo a un destinatario autorizado tras confirmación.')
     opciones={'Inventario general':'inventario','Stock bajo':'stock_bajo','ABC monetario':'abc_monetario','ABC por movimientos':'abc_movimientos'}
     tipo_etiqueta=st.selectbox('Tipo de informe',list(opciones))
+    if 'pdf_actual' not in st.session_state:st.session_state.pdf_actual=None
+    if 'gmail_pendiente' not in st.session_state:st.session_state.gmail_pendiente=None
+    if 'gmail_enviados' not in st.session_state:st.session_state.gmail_enviados=0
     if st.button('Generar PDF',type='primary'):
+        st.session_state.gmail_pendiente=None
+        st.session_state.pdf_actual=None
         if not os.getenv('SUPABASE_URL') or not os.getenv('SUPABASE_KEY'):
             st.error('Faltan las credenciales de Supabase.')
         else:
             try:
                 import agente_inventario as ia
-                import threading
                 from agente import _LOCK
                 with _LOCK: d=ia.generar_reporte_pdf(opciones[tipo_etiqueta])
                 if d.get('ok'):
                     path=Path(d['ruta'])
-                    st.download_button('⬇️ Descargar '+path.name,path.read_bytes(),file_name=path.name,mime='application/pdf')
+                    st.session_state.pdf_actual={'ruta':str(path),'nombre':path.name,'bytes':path.read_bytes()}
                 else:st.error(str(d.get('error','No se generó el archivo.')))
             except Exception:st.error('No se pudo generar el reporte. Verifica los logs del servidor.')
+    pdf=st.session_state.pdf_actual
+    if pdf:
+        st.success('PDF preparado: '+pdf['nombre'])
+        st.download_button('⬇️ Descargar '+pdf['nombre'],pdf['bytes'],file_name=pdf['nombre'],mime='application/pdf')
+        st.divider()
+        st.subheader('✉️ Enviar reporte por Gmail')
+        from servicios.gmail_cloud import configurado, autorizados, validar_destinatario, enviar_pdf
+        if not configurado():
+            st.warning('Gmail aún no está configurado: faltan Secrets de Gmail y la lista de destinatarios autorizados.')
+        elif st.session_state.gmail_enviados >= 3:
+            st.warning('Límite de 3 envíos por sesión alcanzado para esta demostración.')
+        else:
+            with st.form('preparar_gmail'):
+                destino=st.text_input('Correo del destinatario',placeholder='profesor@ejemplo.com')
+                preparar=st.form_submit_button('Preparar correo')
+            if preparar:
+                st.session_state.gmail_pendiente=None
+                try:
+                    validar_destinatario(destino.strip())
+                    st.session_state.gmail_pendiente={'destinatario':destino.strip(),'ruta':pdf['ruta'],'nombre':pdf['nombre']}
+                except ValueError as e:
+                    st.error(str(e))
+            pendiente=st.session_state.gmail_pendiente
+            if pendiente:
+                st.info('Revisa antes de confirmar: '+pendiente['nombre']+' → '+pendiente['destinatario'])
+                col1,col2=st.columns(2)
+                with col1:
+                    if st.button('✅ Confirmar envío por Gmail',type='primary',use_container_width=True):
+                        # Retirar pendiente antes de enviar para evitar duplicados en errores y reruns.
+                        st.session_state.gmail_pendiente=None
+                        try:
+                            resultado=enviar_pdf(pendiente['destinatario'],pendiente['ruta'])
+                            st.session_state.gmail_enviados+=1
+                            st.success('Gmail aceptó el envío. ID: '+resultado['id'])
+                        except Exception:
+                            st.error('No se pudo confirmar el envío con Gmail. Revisa los logs y la carpeta Enviados; no se reintenta automáticamente.')
+                with col2:
+                    if st.button('Cancelar envío',use_container_width=True):
+                        st.session_state.gmail_pendiente=None
+                        st.rerun()
